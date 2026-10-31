@@ -4,7 +4,7 @@ import { get, post } from '../api';
 import { useData } from '../useData';
 import { cartLines, cartTotal, useCart } from '../cart';
 import { useOrders } from '../orders';
-import { emojiFor, rupees } from '../format';
+import { emojiFor, rupees, uuid } from '../format';
 import Stepper from '../components/Stepper';
 
 function loadRazorpay() {
@@ -28,14 +28,14 @@ export default function Cart() {
   const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState(null);
   // One idempotency key per checkout attempt, reused if the same attempt is retried (REQ-18).
-  const attempt = useRef(crypto.randomUUID());
+  const attempt = useRef(uuid());
   const lines = Object.values(state);
   const total = cartTotal(state);
   const slots = slotData || [];
 
   const done = async () => {
     dispatch({ type: 'clear' });
-    attempt.current = crypto.randomUUID();
+    attempt.current = uuid();
     await refreshOrders();
     nav('/orders');
   };
@@ -82,7 +82,7 @@ export default function Cart() {
           modal: { ondismiss: () => resolve() },
         });
         rz.on('payment.failed', () => {
-          attempt.current = crypto.randomUUID(); // REQ-16: a failed attempt can be retried
+          attempt.current = uuid(); // REQ-16: a failed attempt can be retried
           setMsg('Payment failed. No order was created; please try again.');
           resolve();
         });
@@ -90,7 +90,7 @@ export default function Cart() {
       });
     } catch (e) {
       if (e.status === 409) {
-        attempt.current = crypto.randomUUID();
+        attempt.current = uuid();
         await resync();
         setMsg(`${e.message}. We updated your cart${e.details?.length ? ` (${e.details.join('; ')})` : ''}. Please review and try again.`);
       } else setMsg(e.message);
@@ -106,7 +106,7 @@ export default function Cart() {
       const { gatewayPaymentId } = await post(`/payments/${demo.paymentId}/demo-pay`, { outcome });
       const r = await post(`/payments/${demo.paymentId}/confirm`, { gatewayPaymentId });
       setDemo(null);
-      attempt.current = crypto.randomUUID();
+      attempt.current = uuid();
       if (r.status === 'Success') await done();
       else setMsg('Payment failed. No order was created; you can try again.');
     } catch (e) {
