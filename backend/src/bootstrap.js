@@ -31,6 +31,7 @@ async function buildApp(env = process.env) {
     notifier: firebase.notifier,
     verifyToken: firebase.verifyToken,
     revokeSession: firebase.revokeSession,
+    identity: firebase.identity,
   });
 }
 

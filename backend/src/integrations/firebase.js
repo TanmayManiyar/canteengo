@@ -23,6 +23,15 @@ function createFirebase() {
       return { uid: t.uid, email: (t.email || '').toLowerCase() };
     },
     revokeSession: (uid) => getAuth().revokeRefreshTokens(uid),
+    // Used by the owner's "create staff login" feature.
+    identity: {
+      async createUser({ email, password, displayName }) {
+        const u = await getAuth().createUser({ email, password, displayName, emailVerified: true });
+        return { uid: u.uid };
+      },
+      updatePassword: (uid, password) => getAuth().updateUser(uid, { password }),
+      deleteUser: (uid) => getAuth().deleteUser(uid),
+    },
     notifier: {
       async notifyOrderReady(user, order) {
         if (!user.fcmToken) return;

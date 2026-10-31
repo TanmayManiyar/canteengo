@@ -256,3 +256,19 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px
 }
 .picked { margin: 8px 0; }
 .rush-text { font-weight: 700; text-transform: capitalize; }
+
+/* ---------- collapsible sections + accounts ---------- */
+.fold { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; margin: 10px 0; box-shadow: var(--shadow); }
+.fold summary {
+  list-style: none; cursor: pointer; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 700;
+}
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::after { content: '▾'; color: var(--muted); transition: transform 0.15s; margin-left: auto; padding-left: 8px; }
+.fold[open] summary::after { transform: rotate(180deg); }
+.fold-body { padding: 0 16px 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+.account { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.account button { padding: 6px 12px; font-size: 0.85rem; }
+.confirm { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 0.9rem; }
+button.danger { color: #d93025; border-color: #d93025; }
+.cred-card { background: var(--green-soft); border: 1.5px solid var(--green); border-radius: 12px; padding: 12px 14px; margin: 0 0 12px; display: grid; gap: 4px; }
+.cred-card code { font-size: 1.05rem; font-weight: 700; word-break: break-all; user-select: all; }

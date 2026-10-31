@@ -1,0 +1,26 @@
+item name,category,price,availability
+Paneer Tikka Roll,Snacks,70,yes
+Veg Spring Roll,Snacks,55,yes
+Egg Bhurji Pav,Snacks,45,yes
+Masala Omelette,Snacks,40,yes
+Sabudana Khichdi,Snacks,50,yes
+Misal Pav,Snacks,55,yes
+Dahi Puri,Chaat,40,yes
+Sev Puri,Chaat,35,yes
+Pani Puri,Chaat,30,yes
+Corn Chaat,Chaat,45,yes
+Tomato Soup,Starters,45,yes
+Sweet Corn Soup,Starters,50,yes
+Mushroom Soup,Starters,65,yes
+Aloo Paratha,Meals,55,yes
+Curd Rice,Meals,60,yes
+Lemon Rice,Meals,55,yes
+Hot Chocolate,Beverages,60,yes
+Iced Tea,Beverages,35,yes
+Green Tea,Beverages,25,yes
+Buttermilk,Beverages,20,yes
+Banana Shake,Beverages,50,yes
+Oreo Shake,Beverages,65,yes
+Fruit Salad,Desserts,45,yes
+Jalebi,Desserts,35,yes
+Rasmalai,Desserts,50,no

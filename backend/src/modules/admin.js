@@ -1,4 +1,5 @@
 'use strict';
+const crypto = require('crypto');
 const { Router } = require('express');
 const { HttpError } = require('../lib/errors');
 const { requireRole } = require('../middleware/auth');
@@ -6,27 +7,87 @@ const { audit } = require('../lib/audit');
 
 const REVENUE_STATUSES = ['Placed', 'Accepted', 'Preparing', 'Ready', 'Collected'];
 
-module.exports = function adminRoutes({ store, now, authCache }) {
+// Easy to read out loud: no 0/O, 1/l/I.
+const PASSWORD_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+const generatePassword = (length = 10) => Array.from({ length }, () => PASSWORD_CHARS[crypto.randomInt(PASSWORD_CHARS.length)]).join('');
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const present = (u) => ({ id: u.id, name: u.name || '', email: u.email, role: u.role, createdAt: u.createdAt || null });
+
+module.exports = function adminRoutes({ store, now, authCache, identity }) {
   const r = Router();
   const users = store.col('users');
   const owner = requireRole('owner');
 
+  // Searchable, paged account list so the screen never has to show everyone at once.
+  //   GET /admin/users?role=staff|student&q=text&limit=10&offset=0
   r.get('/admin/users', owner, async (req, res) => {
-    const all = await users.find();
-    res.json({ users: all.map((u) => ({ id: u.id, email: u.email, name: u.name, role: u.role })) });
+    const role = ['staff', 'student'].includes(req.query.role) ? req.query.role : null;
+    const q = typeof req.query.q === 'string' ? req.query.q.trim().toLowerCase() : '';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 50);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    let list = (await users.find(role ? { role } : undefined)).filter((u) => u.role !== 'owner');
+    if (q) list = list.filter((u) => `${u.name || ''} ${u.email}`.toLowerCase().includes(q));
+    list.sort((a, b) => (a.name || a.email).localeCompare(b.name || b.email));
+    res.json({ total: list.length, users: list.slice(offset, offset + limit).map(present) });
   });
 
-  // Business rule 5.6: only an owner grants or revokes staff access.
-  r.put('/admin/users/:id/role', owner, async (req, res) => {
-    const role = req.body?.role;
-    if (!['student', 'staff'].includes(role)) throw new HttpError(400, 'role must be student or staff');
-    const target = await users.get(req.params.id);
-    if (!target) throw new HttpError(404, 'User not found');
-    if (target.role === 'owner') throw new HttpError(409, 'Owner access cannot be changed here');
-    const updated = await users.update(target.id, { role });
-    authCache.invalidate(target.uid); // the new role applies on their very next request
-    await audit(store, req.user, `role.${role}`, target.id, now);
-    res.json({ id: updated.id, email: updated.email, role: updated.role });
+  // Business rule 5.6: only the owner can give someone staff access. The owner creates the login;
+  // the server creates the Firebase account and returns the password once so it can be handed over.
+  r.post('/admin/staff', owner, async (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim().slice(0, 80) : '';
+    const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    let password = req.body?.password;
+    if (!name) throw new HttpError(400, 'name is required');
+    if (!EMAIL_RE.test(email)) throw new HttpError(400, 'a valid email is required');
+    if (password !== undefined && password !== '' && (typeof password !== 'string' || password.length < 8)) {
+      throw new HttpError(400, 'password must be at least 8 characters');
+    }
+    const generated = !password;
+    if (generated) password = generatePassword();
+    if (await users.findOne({ email })) throw new HttpError(409, 'An account with this email already exists');
+
+    let account;
+    try {
+      account = await identity.createUser({ email, password, displayName: name });
+    } catch (err) {
+      if (err.code === 'auth/email-already-exists') throw new HttpError(409, 'An account with this email already exists');
+      throw err;
+    }
+    let user;
+    try {
+      user = await users.insert({ uid: account.uid, email, name, role: 'staff', createdAt: now(), createdBy: req.user.id });
+    } catch (err) {
+      await identity.deleteUser(account.uid).catch(() => {}); // do not leave a login without a staff record
+      throw err;
+    }
+    await audit(store, req.user, 'staff.create', user.id, now);
+    res.status(201).json({ ...present(user), password, passwordGenerated: generated });
+  });
+
+  async function staffOr404(id) {
+    const target = await users.get(id);
+    if (!target) throw new HttpError(404, 'Account not found');
+    if (target.role !== 'staff') throw new HttpError(409, 'Only staff accounts can be managed here');
+    return target;
+  }
+
+  r.post('/admin/staff/:id/reset-password', owner, async (req, res) => {
+    const target = await staffOr404(req.params.id);
+    const password = generatePassword();
+    await identity.updatePassword(target.uid, password);
+    await audit(store, req.user, 'staff.resetPassword', target.id, now);
+    res.json({ id: target.id, email: target.email, password });
+  });
+
+  r.delete('/admin/staff/:id', owner, async (req, res) => {
+    const target = await staffOr404(req.params.id);
+    await identity.deleteUser(target.uid).catch((err) => {
+      if (err.code !== 'auth/user-not-found') throw err; // already gone (e.g. a sample account) is fine
+    });
+    await users.remove(target.id);
+    authCache.invalidate(target.uid); // access ends on their very next request
+    await audit(store, req.user, 'staff.remove', target.id, now);
+    res.status(204).end();
   });
 
   // Sales report (owner only). Cancelled/Rejected orders are excluded.

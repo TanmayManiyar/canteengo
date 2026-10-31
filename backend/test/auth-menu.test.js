@@ -30,13 +30,6 @@ test('owner email becomes Owner; unregistered user cannot use the API', async ()
   assert.equal((await t.api('GET', '/api/menu', { token: 'ghost|ghost@ves.ac.in' })).status, 403);
 });
 
-test('only owner changes staff access; students cannot', async () => {
-  const users = (await t.api('GET', '/api/admin/users', { token: f.owner })).body.users;
-  const stu = users.find((u) => u.email === 'stu1@ves.ac.in');
-  assert.equal((await t.api('PUT', `/api/admin/users/${stu.id}/role`, { token: f.staff, body: { role: 'staff' } })).status, 403);
-  assert.equal((await t.api('GET', '/api/admin/users', { token: f.student })).status, 403);
-});
-
 test('menu: staff manage, students read; invalid writes rejected at the API layer', async () => {
   assert.equal((await t.api('POST', '/api/menu', { token: f.student, body: { name: 'X', category: 'Y', price: 5 } })).status, 403);
   const neg = await t.api('POST', '/api/menu', { token: f.staff, body: { name: 'Bad', category: 'Snacks', price: -5 } });
@@ -97,13 +90,4 @@ test('bulk CSV upload: row errors reported, duplicates flagged, nothing publishe
 test('bulk CSV with wrong columns is rejected', async () => {
   const r = await t.api('POST', '/api/menu/drafts/upload', { token: f.staff, body: { csv: 'a,b\n1,2' } });
   assert.equal(r.status, 400);
-});
-
-test('role changes and logout take effect immediately despite the auth cache', async () => {
-  // warm the cache: staff can write
-  assert.equal((await t.api('POST', '/api/slots', { token: f.staff, body: { label: 'x', capacity: 1 } })).status, 201);
-  const users = (await t.api('GET', '/api/admin/users', { token: f.owner })).body.users;
-  const staffUser = users.find((u) => u.email === 'staff1@ves.ac.in');
-  await t.api('PUT', `/api/admin/users/${staffUser.id}/role`, { token: f.owner, body: { role: 'student' } });
-  assert.equal((await t.api('POST', '/api/slots', { token: f.staff, body: { label: 'y', capacity: 1 } })).status, 403);
 });

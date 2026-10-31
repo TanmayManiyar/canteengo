@@ -1,6 +1,24 @@
 import { useCallback, useEffect, useState } from 'react';
 import { del, get, post, put } from '../api';
 
+const SAMPLE_CSV = [
+  'item name,category,price,availability',
+  'Paneer Tikka Roll,Snacks,70,yes',
+  'Veg Spring Roll,Snacks,55,yes',
+  'Tomato Soup,Starters,45,yes',
+  'Iced Tea,Beverages,35,yes',
+  'Rasmalai,Desserts,50,no',
+].join('\n');
+
+function downloadSample() {
+  const url = URL.createObjectURL(new Blob([SAMPLE_CSV + '\n'], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'canteengo-sample-menu.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function MenuAdmin() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState({ name: '', category: '', price: '' });
@@ -72,7 +90,10 @@ export default function MenuAdmin() {
       ))}
 
       <h2>Bulk upload (CSV)</h2>
-      <p className="muted">Columns: item name, category, price, availability. PDF upload is not available yet.</p>
+      <p className="muted">
+        Columns: item name, category, price, availability (yes/no). PDF upload is not available yet.{' '}
+        <button type="button" className="link" onClick={downloadSample}>Download a sample CSV</button>
+      </p>
       <input type="file" accept=".csv,text/csv" onChange={readFile} />
       <button disabled={!csv} onClick={upload}>Create drafts</button>
       {uploadErrors.map((e) => <p key={e.line} className="error">Line {e.line}: {e.reason}</p>)}

@@ -48,6 +48,23 @@ async function start(envOverrides = {}, { makeGateway } = {}) {
   const store = createMemoryStore();
   const gateway = makeGateway ? makeGateway(store) : createFakeGateway();
   const pushed = [];
+  // Fake Firebase user management used by the owner's "create staff login" feature.
+  const accounts = new Map(); // uid -> { email, password }
+  const identity = {
+    async createUser({ email, password }) {
+      if ([...accounts.values()].some((a) => a.email === email)) throw Object.assign(new Error('exists'), { code: 'auth/email-already-exists' });
+      const uid = 'fb:' + email;
+      accounts.set(uid, { email, password });
+      return { uid };
+    },
+    async updatePassword(uid, password) {
+      if (!accounts.has(uid)) throw Object.assign(new Error('missing'), { code: 'auth/user-not-found' });
+      accounts.get(uid).password = password;
+    },
+    async deleteUser(uid) {
+      if (!accounts.delete(uid)) throw Object.assign(new Error('missing'), { code: 'auth/user-not-found' });
+    },
+  };
   const config = loadConfig({
     COLLEGE_EMAIL_DOMAIN: 'ves.ac.in',
     OWNER_EMAIL: 'owner@ves.ac.in',
@@ -57,6 +74,7 @@ async function start(envOverrides = {}, { makeGateway } = {}) {
     store,
     gateway,
     config,
+    identity,
     now: () => clock.t,
     notifier: { notifyOrderReady: async (user, order) => pushed.push({ user, order }) },
     verifyToken: async (token) => {
@@ -98,17 +116,18 @@ async function start(envOverrides = {}, { makeGateway } = {}) {
     return token;
   }
 
-  async function makeStaff(ownerToken, staffUid) {
-    const users = await api('GET', '/api/admin/users', { token: ownerToken });
-    const u = users.body.users.find((x) => x.email === `${staffUid}@ves.ac.in`);
-    await api('PUT', `/api/admin/users/${u.id}/role`, { token: ownerToken, body: { role: 'staff' } });
+  // The owner creates a staff login; returns the token that staff member would use after logging in.
+  async function createStaff(ownerToken, name = 'staff1') {
+    const email = `${name}@ves.ac.in`;
+    const r = await api('POST', '/api/admin/staff', { token: ownerToken, body: { name, email } });
+    if (r.status !== 201) throw new Error(`createStaff failed ${r.status} ${JSON.stringify(r.body)}`);
+    return tokenFor('fb:' + email, email);
   }
 
   // Standard fixture: owner, staff, student, one menu item and a slot.
   async function seed() {
     const owner = await signUp('owner', 'owner@ves.ac.in');
-    const staff = await signUp('staff1', 'staff1@ves.ac.in');
-    await makeStaff(owner, 'staff1');
+    const staff = await createStaff(owner, 'staff1');
     const student = await signUp('stu1', 'stu1@ves.ac.in');
     const samosa = (await api('POST', '/api/menu', { token: staff, body: { name: 'Samosa', category: 'Snacks', price: 15 } })).body;
     const tea = (await api('POST', '/api/menu', { token: staff, body: { name: 'Tea', category: 'Beverages', price: 10.5 } })).body;
@@ -128,7 +147,7 @@ async function start(envOverrides = {}, { makeGateway } = {}) {
   }
 
   return {
-    api, signUp, seed, placeOrder, store, gateway, pushed, clock, config,
+    api, signUp, createStaff, seed, placeOrder, store, gateway, identity, accounts, pushed, clock, config,
     close: () => new Promise((r) => server.close(r)),
   };
 }
