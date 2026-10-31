@@ -1,0 +1,27 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  CanteenGo backend for AWS Academy Learner Lab. Uses the pre-made LabRole (labs cannot create IAM roles)
+  and a Lambda Function URL instead of API Gateway. Settings are bundled in the package by deploy-lab.js.
+
+Resources:
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .build/backend/
+      Handler: src/lambda.handler
+      Runtime: nodejs22.x
+      Timeout: 20
+      MemorySize: 512
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LabRole"
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          # firebase-admin's jwks-rsa/jose is ESM-only; Lambda's Node 22 needs this to require() it.
+          NODE_OPTIONS: --experimental-require-module
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for VITE_API_URL
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl

@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: CanteenGo backend on Lambda + HTTP API (free-tier friendly). NOT yet deployed or validated.
+
+Parameters:
+  MongoUri:
+    Type: String
+    NoEcho: true
+  CorsOrigin:
+    Type: String
+    Default: "*"
+  CollegeEmailDomain:
+    Type: String
+  OwnerEmail:
+    Type: String
+  RazorpayKeyId:
+    Type: String
+  RazorpayKeySecret:
+    Type: String
+    NoEcho: true
+  RazorpayWebhookSecret:
+    Type: String
+    NoEcho: true
+  FirebaseServiceAccount:
+    Type: String
+    NoEcho: true
+
+Globals:
+  Function:
+    Runtime: nodejs22.x
+    Timeout: 15
+    MemorySize: 512
+    Environment:
+      Variables:
+        MONGODB_URI: !Ref MongoUri
+        CORS_ORIGIN: !Ref CorsOrigin
+        COLLEGE_EMAIL_DOMAIN: !Ref CollegeEmailDomain
+        OWNER_EMAIL: !Ref OwnerEmail
+        RAZORPAY_KEY_ID: !Ref RazorpayKeyId
+        RAZORPAY_KEY_SECRET: !Ref RazorpayKeySecret
+        RAZORPAY_WEBHOOK_SECRET: !Ref RazorpayWebhookSecret
+        FIREBASE_SERVICE_ACCOUNT: !Ref FirebaseServiceAccount
+
+Resources:
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: src/lambda.handler
+      Events:
+        Any:
+          Type: HttpApi
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+  ExpirePaymentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../backend/
+      Handler: src/lambda.expirePayments
+      Events:
+        EveryMinute:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: rate(1 minute)
+
+Outputs:
+  ApiUrl:
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.amazonaws.com"
