@@ -23,7 +23,7 @@ function createApp(deps) {
   // Gateway webhook: raw body + signature, no Firebase token.
   app.post('/api/payments/webhook', express.raw({ type: '*/*', limit: '256kb' }), orders.webhook);
 
-  app.use(express.json({ limit: '1mb' }));
+  app.use(express.json({ limit: '5600kb' })); // room for a 4 MB PDF sent as base64
   const api = express.Router();
   api.use(authenticate(d));
   api.use(require('./modules/auth')(d));

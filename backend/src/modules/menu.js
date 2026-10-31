@@ -3,6 +3,7 @@ const { Router } = require('express');
 const { HttpError } = require('../lib/errors');
 const { requireUser, requireRole, STAFF } = require('../middleware/auth');
 const { parseCsv } = require('../lib/csv');
+const { parseMenuText, extractText } = require('../lib/menuPdf');
 const { audit } = require('../lib/audit');
 
 const norm = (s) => String(s).trim().toLowerCase();
@@ -139,6 +140,39 @@ module.exports = function menuRoutes({ store, now }) {
       );
     }
     res.status(201).json({ drafts: created, errors }); // nothing goes live yet (REQ-31)
+  });
+
+  // ---- Bulk upload from a text-based PDF (REQ-30). The PDF arrives base64-encoded in JSON. ----
+  r.post('/menu/drafts/upload-pdf', requireRole(...STAFF), async (req, res) => {
+    const b64 = req.body?.pdf;
+    if (typeof b64 !== 'string' || !b64) throw new HttpError(400, 'pdf (base64) is required');
+    const buffer = Buffer.from(b64, 'base64');
+    if (buffer.length > 4 * 1024 * 1024) throw new HttpError(413, 'PDF is too large (4 MB maximum)');
+    if (buffer.subarray(0, 5).toString('latin1') !== '%PDF-') throw new HttpError(400, 'That file is not a PDF');
+
+    let text;
+    try {
+      text = await extractText(buffer);
+    } catch (err) {
+      if (err.code === 'NO_TEXT') {
+        throw new HttpError(422, 'This PDF has no readable text (it looks scanned). A text-based PDF file is required.');
+      }
+      throw new HttpError(422, 'This PDF could not be read. Please upload a text-based PDF.');
+    }
+    const { rows, errors } = parseMenuText(text);
+    if (!rows.length) throw new HttpError(422, 'No menu items with prices were found in this PDF', errors);
+
+    const existing = await menu.find();
+    const created = [];
+    for (const row of rows) {
+      if (!(row.price > 0)) {
+        errors.push({ line: 0, reason: `"${row.name}" has an invalid price` });
+        continue;
+      }
+      const duplicateOf = existing.find((m) => norm(m.name) === norm(row.name) && norm(m.category) === norm(row.category));
+      created.push(await drafts.insert({ ...row, duplicateOf: duplicateOf ? duplicateOf.id : null, createdBy: req.user.id }));
+    }
+    res.status(201).json({ drafts: created, errors }); // nothing goes live until staff publish (REQ-31)
   });
 
   r.get('/menu/drafts', requireRole(...STAFF), async (req, res) => res.json({ drafts: await drafts.find() }));

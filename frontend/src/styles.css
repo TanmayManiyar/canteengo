@@ -255,7 +255,7 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px
   .rush.very-busy, .rush-text.very-busy { color: #ff8a80; }
 }
 .picked { margin: 8px 0; }
-.rush-text { font-weight: 700; text-transform: capitalize; }
+.rush-text { font-weight: 700; }
 
 /* ---------- collapsible sections + accounts ---------- */
 .fold { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; margin: 10px 0; box-shadow: var(--shadow); }

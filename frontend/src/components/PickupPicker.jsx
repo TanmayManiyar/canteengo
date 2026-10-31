@@ -12,6 +12,8 @@ const MIN = 60_000;
 const timeOf = (ms) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 const nextQuarter = (ms) => Math.ceil(ms / (15 * MIN)) * 15 * MIN;
 
+export const rushText = (level) => (RUSH[level] || RUSH.low).text;
+
 export function RushBadge({ level, full }) {
   const r = full ? { text: 'Full', cls: 'very-busy' } : RUSH[level] || RUSH.low;
   return <span className={'rush ' + r.cls}><i aria-hidden="true" />{r.text}</span>;

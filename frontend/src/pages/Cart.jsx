@@ -5,7 +5,7 @@ import { cartLines, cartTotal, useCart } from '../cart';
 import { useOrders } from '../orders';
 import { emojiFor, rupees, uuid } from '../format';
 import Stepper from '../components/Stepper';
-import PickupPicker from '../components/PickupPicker';
+import PickupPicker, { rushText } from '../components/PickupPicker';
 
 function loadRazorpay() {
   if (window.Razorpay) return Promise.resolve();
@@ -167,7 +167,7 @@ export default function Cart() {
       <h2 className="section-title">When do you want it?</h2>
       <PickupPicker key={pickerKey} value={choice} onChange={setChoice} />
       {choice && (
-        <p className="picked">Pickup: <strong>{choice.label}</strong>{choice.rush?.level && <> · <span className={'rush-text ' + choice.rush.level}>{choice.rush.level === 'very-busy' ? 'very busy' : choice.rush.level}</span></>}</p>
+        <p className="picked">Pickup: <strong>{choice.label}</strong>{choice.rush?.level && <> · <span className={'rush-text ' + choice.rush.level}>{rushText(choice.rush.level)}</span></>}</p>
       )}
 
       <h2 className="section-title">Bill details</h2>
