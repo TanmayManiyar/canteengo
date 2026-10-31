@@ -22,7 +22,17 @@ vi.mock('./api', () => ({
     if (path === '/menu') return { categories: MENU.categories };
     if (path === '/offers') return { offers: MENU.offers };
     if (path === '/orders') return { orders: [] };
-    if (path === '/slots') return { slots: [] };
+    if (path === '/pickup/options') {
+      const base = Math.ceil((Date.now() + 20 * 60_000) / 900_000) * 900_000;
+      return {
+        now: { available: true, level: 'moderate', activeOrders: 3, activeUsers: 2, waitMinutes: 11 },
+        windows: [
+          { startsAt: base, label: 'x', slotId: null, level: 'low', percent: 10, booked: 1, remaining: 11, full: false },
+          { startsAt: base + 900_000, label: 'y', slotId: 'slot-1', level: 'very-busy', percent: 100, booked: 12, remaining: 0, full: true },
+        ],
+        rules: { leadMinutes: 10, stepMinutes: 15, openHour: 0, closeHour: 24, timezone: 'Asia/Kolkata' },
+      };
+    }
     return {};
   }),
   post: vi.fn(async () => ({})),
@@ -84,5 +94,27 @@ describe('plain-HTTP pages (no crypto.randomUUID)', () => {
     } finally {
       Object.defineProperty(crypto, 'randomUUID', { value: original, configurable: true });
     }
+  });
+});
+
+describe('pickup picker', () => {
+  it('shows the rush right now and for time windows, and lets the student choose', async () => {
+    localStorage.clear();
+    renderApp();
+    await screen.findByText('Samosa');
+    fireEvent.click(screen.getByRole('button', { name: /add samosa/i }));
+    fireEvent.click(await screen.findByText(/view cart/i));
+
+    expect(await screen.findByText(/3 orders in progress/)).toBeInTheDocument();
+    expect(screen.getByText(/2 people ordering/)).toBeInTheDocument();
+    expect(screen.getByText(/about 11 min wait/)).toBeInTheDocument();
+    expect(screen.getAllByText('Moderately busy').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Full').length).toBeGreaterThan(0); // the booked-out window
+
+    const pay = screen.getByRole('button', { name: /choose when you want it/i });
+    expect(pay).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /right now/i }));
+    expect(await screen.findByRole('button', { name: /^pay ₹15$/i })).toBeEnabled();
+    expect(screen.getByText(/Pickup:/)).toBeInTheDocument();
   });
 });

@@ -46,6 +46,13 @@ async function createMongoStore(uri, dbName) {
 
   return {
     col,
+    async ensureSlot(doc) {
+      const { id, ...rest } = doc;
+      const d = await db
+        .collection('slots')
+        .findOneAndUpdate({ _id: id }, { $setOnInsert: rest }, { upsert: true, returnDocument: 'after' });
+      return toDoc(d);
+    },
     async reserveSlot(id) {
       const d = await db
         .collection('slots')

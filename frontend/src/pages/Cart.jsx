@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { get, post } from '../api';
-import { useData } from '../useData';
 import { cartLines, cartTotal, useCart } from '../cart';
 import { useOrders } from '../orders';
 import { emojiFor, rupees, uuid } from '../format';
 import Stepper from '../components/Stepper';
+import PickupPicker from '../components/PickupPicker';
 
 function loadRazorpay() {
   if (window.Razorpay) return Promise.resolve();
@@ -22,8 +22,8 @@ export default function Cart() {
   const { state, dispatch } = useCart();
   const { refresh: refreshOrders } = useOrders();
   const nav = useNavigate();
-  const { data: slotData, refresh: refreshSlots } = useData('slots', async () => (await get('/slots')).slots);
-  const [slotId, setSlotId] = useState('');
+  const [choice, setChoice] = useState(null); // { key, pickup, label, rush }
+  const [pickerKey, setPickerKey] = useState(0); // bump to reload the pickup options
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
   const [demo, setDemo] = useState(null);
@@ -31,7 +31,6 @@ export default function Cart() {
   const attempt = useRef(uuid());
   const lines = Object.values(state);
   const total = cartTotal(state);
-  const slots = slotData || [];
 
   const done = async () => {
     dispatch({ type: 'clear' });
@@ -48,14 +47,15 @@ export default function Cart() {
     } catch {
       /* the message below still explains what happened */
     }
-    refreshSlots();
+    setChoice(null);
+    setPickerKey((k) => k + 1);
   }
 
   async function pay() {
     setBusy(true);
     setMsg('');
     try {
-      const s = await post('/checkout', { items: cartLines(state), slotId, idempotencyKey: attempt.current });
+      const s = await post('/checkout', { items: cartLines(state), pickup: choice.pickup, idempotencyKey: attempt.current });
       if (s.demo) {
         setDemo(s); // classroom demo: no real gateway, the student confirms on this screen
         return;
@@ -164,22 +164,11 @@ export default function Cart() {
         ))}
       </section>
 
-      <h2 className="section-title">Pickup time</h2>
-      {slots.length === 0 && <p className="muted">No pickup slots are open right now.</p>}
-      <div className="slot-grid" role="radiogroup" aria-label="Pickup slot">
-        {slots.map((s) => (
-          <button
-            key={s.id}
-            role="radio"
-            aria-checked={slotId === s.id}
-            className={'slot' + (slotId === s.id ? ' selected' : '')}
-            onClick={() => setSlotId(s.id)}
-          >
-            <strong>{s.label}</strong>
-            <span>{s.remaining} left</span>
-          </button>
-        ))}
-      </div>
+      <h2 className="section-title">When do you want it?</h2>
+      <PickupPicker key={pickerKey} value={choice} onChange={setChoice} />
+      {choice && (
+        <p className="picked">Pickup: <strong>{choice.label}</strong>{choice.rush?.level && <> · <span className={'rush-text ' + choice.rush.level}>{choice.rush.level === 'very-busy' ? 'very busy' : choice.rush.level}</span></>}</p>
+      )}
 
       <h2 className="section-title">Bill details</h2>
       <section className="card bill">
@@ -190,8 +179,8 @@ export default function Cart() {
 
       {msg && <p className="error" role="alert">{msg}</p>}
       <div className="pay-bar">
-        <button className="primary block" disabled={!slotId || busy} onClick={pay}>
-          {busy ? 'Please wait…' : slotId ? `Pay ${rupees(total)}` : 'Choose a pickup time'}
+        <button className="primary block" disabled={!choice || busy} onClick={pay}>
+          {busy ? 'Please wait…' : choice ? `Pay ${rupees(total)}` : 'Choose when you want it'}
         </button>
       </div>
     </div>

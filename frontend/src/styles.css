@@ -223,3 +223,36 @@ input:focus, select:focus { outline: 2px solid var(--brand); outline-offset: 1px
   .shell.student { padding-bottom: 24px; }
   .cart-bar { bottom: 16px; }
 }
+
+/* ---------- pickup picker + rush ---------- */
+.pickup { display: grid; gap: 6px; }
+.mini-title { font-size: 0.9rem; color: var(--muted); font-weight: 600; margin: 12px 0 2px; }
+.pick-card {
+  display: block; width: 100%; text-align: left; background: var(--surface); color: var(--text);
+  border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 14px;
+}
+.pick-card.selected, .time-chip.selected, .custom-time.selected { border-color: var(--brand); background: var(--brand-soft); }
+.pick-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 4px; }
+.chip-row { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.chip-row.wrap { flex-wrap: wrap; overflow: visible; }
+.time-chip {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 112px;
+  background: var(--surface); color: var(--text); border: 1.5px solid var(--line); border-radius: 12px; padding: 8px 12px;
+}
+.time-chip span:not(.rush) { color: var(--muted); font-size: 0.8rem; }
+.time-chip.small { min-width: 96px; }
+.custom-time { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1.5px solid var(--line); border-radius: 12px; padding: 8px; }
+.custom-time select, .custom-time input { margin: 0; }
+.rush { display: inline-flex; align-items: center; gap: 5px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.rush i { width: 9px; height: 9px; border-radius: 50%; background: currentColor; display: inline-block; }
+.rush.low, .rush-text.low { color: var(--green); }
+.rush.moderate, .rush-text.moderate { color: #b7791f; }
+.rush.busy, .rush-text.busy { color: #d9480f; }
+.rush.very-busy, .rush-text.very-busy { color: #d93025; }
+@media (prefers-color-scheme: dark) {
+  .rush.moderate, .rush-text.moderate { color: #f6c453; }
+  .rush.busy, .rush-text.busy { color: #ff9f6b; }
+  .rush.very-busy, .rush-text.very-busy { color: #ff8a80; }
+}
+.picked { margin: 8px 0; }
+.rush-text { font-weight: 700; text-transform: capitalize; }

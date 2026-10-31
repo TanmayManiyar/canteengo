@@ -51,6 +51,12 @@ function createMemoryStore() {
 
   return {
     col,
+    // Creates the slot if it does not exist yet and returns it (never resets an existing slot's bookings).
+    async ensureSlot(doc) {
+      const m = map('slots');
+      if (!m.has(doc.id)) m.set(doc.id, { ...doc });
+      return { ...m.get(doc.id) };
+    },
     // Atomic: only succeeds while reserved < capacity (REQ-11, no overbooking).
     async reserveSlot(id) {
       const d = map('slots').get(id);

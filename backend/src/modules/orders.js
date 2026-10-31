@@ -58,7 +58,7 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
   // Mark a Pending payment as ended (Failed / TimedOut) and release its slot, exactly once.
   async function endPending(payment, status) {
     const updated = await payments.update(payment.id, { status }, { status: 'Pending' });
-    if (updated) await store.releaseSlot(payment.slotId);
+    if (updated && payment.slotId) await store.releaseSlot(payment.slotId);
     return updated;
   }
 
@@ -142,18 +142,142 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
     res.status(201).json(slot);
   });
 
+  // ---------- pickup times: "right now", fixed slots, or any custom time ----------
+  const WINDOW_MS = 15 * 60 * 1000;
+  const fmtTime = (ms) =>
+    new Date(ms).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: config.timezone });
+  const windowLabel = (start) => `${fmtTime(start)} – ${fmtTime(start + WINDOW_MS)}`;
+  const hourOf = (ms) =>
+    Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: config.timezone }).format(ms));
+  const isOpenAt = (ms) => hourOf(ms) >= config.openHour && hourOf(ms) < config.closeHour;
+  const windowStart = (ms) => Math.floor(ms / WINDOW_MS) * WINDOW_MS;
+
+  // Rush level from a load ratio (1.0 = the kitchen / slot is exactly full).
+  const levelFor = (ratio) => (ratio < 0.4 ? 'low' : ratio < 0.8 ? 'moderate' : ratio < 1.2 ? 'busy' : 'very-busy');
+
+  // Right-now rush: orders the kitchen is working on plus people who are paying right now.
+  async function currentRush() {
+    const [placed, accepted, preparing, checkingOut] = await Promise.all([
+      orders.find({ status: 'Placed' }),
+      orders.find({ status: 'Accepted' }),
+      orders.find({ status: 'Preparing' }),
+      payments.find({ status: 'Pending' }),
+    ]);
+    const active = [...placed, ...accepted, ...preparing];
+    const stillPaying = checkingOut.filter((p) => p.expiresAt > now());
+    const people = new Set([...active.map((o) => o.userId), ...stillPaying.map((p) => p.userId)]);
+    const load = active.length + stillPaying.length;
+    return {
+      level: levelFor(load / config.kitchenCapacity),
+      activeOrders: active.length,
+      activeUsers: people.size,
+      waitMinutes: Math.min(90, Math.round(5 + load * config.prepMinutesPerOrder)),
+    };
+  }
+
+  const slotRush = (reserved, capacity) => ({
+    level: levelFor(reserved / capacity),
+    percent: Math.min(100, Math.round((reserved / capacity) * 100)),
+    booked: reserved,
+    remaining: Math.max(0, capacity - reserved),
+    full: reserved >= capacity,
+  });
+
+  // Everything the cart needs in one call: rush right now, and the next pickup windows with their rush.
+  r.get('/pickup/options', requireUser, async (req, res) => {
+    const t = now();
+    const [rushNow, allSlots] = await Promise.all([currentRush(), slots.find()]);
+    const byStart = new Map(allSlots.filter((s) => s.startsAt).map((s) => [s.startsAt, s]));
+    const earliest = t + config.pickupLeadMs;
+    const list = [];
+    for (let start = windowStart(earliest); list.length < 12; start += WINDOW_MS) {
+      if (start + WINDOW_MS <= earliest) continue;
+      if (!isOpenAt(start)) {
+        if (start > t + 24 * 3_600_000) break;
+        continue;
+      }
+      const doc = byStart.get(start);
+      list.push({
+        startsAt: start,
+        label: doc?.label || windowLabel(start),
+        slotId: doc?.id || null,
+        ...slotRush(doc?.reserved || 0, doc?.capacity || config.defaultSlotCapacity),
+      });
+    }
+    // Staff-made slots that do not sit on a quarter-hour boundary are listed too.
+    for (const s of allSlots) {
+      if (s.startsAt && s.startsAt >= earliest && s.startsAt % WINDOW_MS !== 0 && s.startsAt < t + 24 * 3_600_000) {
+        list.push({ startsAt: s.startsAt, label: s.label, slotId: s.id, ...slotRush(s.reserved, s.capacity) });
+      }
+    }
+    list.sort((a, b) => a.startsAt - b.startsAt);
+    res.json({
+      now: { available: isOpenAt(t), ...rushNow },
+      windows: list,
+      rules: { leadMinutes: config.pickupLeadMs / 60000, stepMinutes: 15, openHour: config.openHour, closeHour: config.closeHour, timezone: config.timezone },
+    });
+  });
+
+  // Rush for any custom time the student types in.
+  r.get('/pickup/rush', requireUser, async (req, res) => {
+    const at = Number(req.query.at);
+    if (!Number.isFinite(at)) throw new HttpError(400, 'at must be a time in milliseconds');
+    const start = windowStart(at);
+    const doc = (await slots.find({ startsAt: start }))[0];
+    res.json({
+      startsAt: start,
+      label: doc?.label || windowLabel(start),
+      open: isOpenAt(at),
+      ...slotRush(doc?.reserved || 0, doc?.capacity || config.defaultSlotCapacity),
+    });
+  });
+
+  // Turns the student's choice into a slot to reserve (or none for "right now").
+  async function resolvePickup(body) {
+    const p = body.pickup || (typeof body.slotId === 'string' ? { type: 'slot', slotId: body.slotId } : null);
+    if (!p || typeof p !== 'object') throw new HttpError(400, 'pickup is required');
+    if (p.type === 'asap') {
+      if (!isOpenAt(now())) throw new HttpError(409, 'The canteen is closed right now. Please choose a later time.');
+      return { slotId: null, label: 'Right now (ASAP)' };
+    }
+    if (p.type === 'slot') {
+      const slot = typeof p.slotId === 'string' ? await slots.get(p.slotId) : null;
+      if (!slot) throw new HttpError(404, 'Pickup slot not found');
+      if (slot.startsAt && slot.startsAt <= now()) throw new HttpError(409, 'Pickup slot has already started');
+      return { slotId: slot.id, label: slot.label };
+    }
+    if (p.type === 'custom') {
+      const at = Number(p.at);
+      if (!Number.isFinite(at)) throw new HttpError(400, 'pickup.at must be a time in milliseconds');
+      const lead = config.pickupLeadMs / 60000;
+      if (at < now() + config.pickupLeadMs) throw new HttpError(409, `Please choose a time at least ${lead} minutes from now`);
+      if (at > now() + 2 * 24 * 3_600_000) throw new HttpError(409, 'You can order up to 2 days ahead');
+      if (!isOpenAt(at)) throw new HttpError(409, 'The canteen is closed at that time');
+      const start = windowStart(at);
+      // Reuse a staff-made slot for this quarter-hour if there is one, otherwise create it on demand.
+      let slot = (await slots.find({ startsAt: start }))[0];
+      if (!slot) {
+        slot = await store.ensureSlot({
+          id: `auto-${start}`, label: windowLabel(start), capacity: config.defaultSlotCapacity, reserved: 0, startsAt: start, auto: true,
+        });
+      }
+      return { slotId: slot.id, label: slot.label };
+    }
+    throw new HttpError(400, 'Unknown pickup type');
+  }
+
   // ---------- checkout (REQ-9..12, 16, 18) ----------
   r.post('/checkout', requireRole('student'), async (req, res) => {
-    const { items, slotId, idempotencyKey } = req.body || {};
+    const { items, idempotencyKey } = req.body || {};
     if (typeof idempotencyKey !== 'string' || idempotencyKey.length < 8) {
       throw new HttpError(400, 'idempotencyKey is required');
     }
     // Independent lookups run together: each database round trip is the main source of latency.
-    const [, prior, menuDocs, slot] = await Promise.all([
+    const [, prior, menuDocs, pickup] = await Promise.all([
       expirePending(),
       payments.findOne({ idempotencyKey }),
       menu.find(),
-      typeof slotId === 'string' ? slots.get(slotId) : null,
+      resolvePickup(req.body || {}).catch((error) => ({ error })),
     ]);
     if (prior) {
       if (prior.userId !== req.user.id) throw new HttpError(409, 'Idempotency key already used');
@@ -167,9 +291,9 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
     );
     if (!result.valid) throw new HttpError(409, 'Cart is no longer valid', result.errors);
 
-    if (!slot) throw new HttpError(404, 'Pickup slot not found');
-    if (slot.startsAt && slot.startsAt <= now()) throw new HttpError(409, 'Pickup slot has already started');
-    if (!(await store.reserveSlot(slotId))) throw new HttpError(409, 'Pickup slot is full');
+    if (pickup.error) throw pickup.error;
+    const slotId = pickup.slotId; // null for "right now"
+    if (slotId && !(await store.reserveSlot(slotId))) throw new HttpError(409, 'That pickup time is full, please choose another');
 
     const byId = new Map(menuDocs.map((m) => [m.id, m]));
     const snapshot = items.map((i) => ({
@@ -187,13 +311,13 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
         amount: result.total,
         items: snapshot,
         slotId,
-        slotLabel: slot.label,
+        slotLabel: pickup.label,
         status: 'Pending',
         createdAt: now(),
         expiresAt: now() + config.paymentTimeoutMs,
       });
     } catch (err) {
-      await store.releaseSlot(slotId);
+      if (slotId) await store.releaseSlot(slotId);
       if (err.code === 11000) {
         const dup = await payments.findOne({ idempotencyKey });
         if (dup && dup.userId === req.user.id) return res.json(session(dup));
@@ -304,7 +428,7 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
     if (next === 'Rejected') patch.needsManualResolution = true; // outside refund window: manual (REQ-20)
     const updated = await orders.update(o.id, patch, { status: o.status });
     if (!updated) throw new HttpError(409, 'Order was changed by someone else, refresh and retry');
-    if (next === 'Rejected') await store.releaseSlot(o.slotId);
+    if (next === 'Rejected' && o.slotId) await store.releaseSlot(o.slotId);
     await audit(store, req.user, `order.${next}`, o.id, now);
     if (next === 'Ready') {
       const owner = await users.get(o.userId);
@@ -330,7 +454,7 @@ module.exports = function orderRoutes({ store, gateway, notifier, config, now })
     const payment = await payments.get(o.paymentId);
     await gateway.refund(payment.gatewayPaymentId, paise(payment.amount));
     await payments.update(payment.id, { status: 'Refunded' });
-    await store.releaseSlot(o.slotId);
+    if (o.slotId) await store.releaseSlot(o.slotId);
     res.json(presentOrder(updated));
   });
 
